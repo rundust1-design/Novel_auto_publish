@@ -75,6 +75,36 @@ class Api:
         """Check if login state file exists"""
         return os.path.exists(STATE_FILE)
 
+    def _dismiss_platform_popups(self, target_page, wait_ms=200):
+        """关闭平台提示弹窗，避免键盘快捷键作用到弹窗或整页。"""
+        dismissed = False
+        try:
+            for dismiss_text in ["我知道了", "知道了", "关闭", "跳过", "完成"]:
+                btn = target_page.get_by_text(dismiss_text, exact=True).first
+                try:
+                    btn.wait_for(state="visible", timeout=wait_ms)
+                    if btn.is_visible():
+                        btn.click(force=True)
+                        target_page.wait_for_timeout(500)
+                        dismissed = True
+                except:
+                    pass
+        except:
+            pass
+        return dismissed
+
+    @staticmethod
+    def _chapter_file_sort_key(file_path):
+        """按真实章节号排序，保证截取发布数量前的章节顺序正确。"""
+        raw_title = os.path.splitext(os.path.basename(file_path))[0]
+        # 文件名按字符串排序会把“第10章”排到“第5章”前面，这里先抽取章节数字做自然排序。
+        match = re.search(r'第\s*(\d+)\s*章', raw_title)
+        if not match:
+            match = re.search(r'^\s*(\d+)', raw_title)
+        if match:
+            return (0, int(match.group(1)), raw_title.casefold())
+        return (1, raw_title.casefold())
+
     def get_books(self):
         """Scan source_dir for books and txt files"""
         books = []
@@ -220,9 +250,12 @@ class Api:
 
             # Fetch txt files
             sub_path = os.path.join(source_dir, book_name_filter)
-            txts = sorted(glob.glob(os.path.join(sub_path, "*.txt")))
+            txts = sorted(glob.glob(os.path.join(sub_path, "*.txt")), key=self._chapter_file_sort_key)
             if publish_count is not None and publish_count > 0:
                 txts = txts[:publish_count]
+            queue_preview = " -> ".join(os.path.splitext(os.path.basename(path))[0] for path in txts[:10])
+            if queue_preview:
+                self.log(f"本次发射队列预览：{queue_preview}", "text-blue-300")
                 
             self.log(f"本次爆更总发射目标数：{len(txts)} 章", "text-gray-300 font-bold")
             
@@ -345,17 +378,8 @@ class Api:
                             # 该弹窗可能在章节管理页面加载时弹出，需要先关闭才能继续操作
                             try:
                                 current_active_page = context.pages[-1] if len(context.pages) > 1 else page
-                                for dismiss_text in ["我知道了", "知道了", "关闭"]:
-                                    dismiss_btn = current_active_page.get_by_text(dismiss_text, exact=True).first
-                                    try:
-                                        dismiss_btn.wait_for(state="visible", timeout=2000)
-                                        if dismiss_btn.is_visible():
-                                            dismiss_btn.click(force=True)
-                                            self.log(" -> 已自动关闭平台内容提示弹窗", "text-gray-400")
-                                            current_active_page.wait_for_timeout(1000)
-                                            break
-                                    except:
-                                        pass
+                                if self._dismiss_platform_popups(current_active_page, wait_ms=2000):
+                                    self.log(" -> 已自动关闭平台内容提示弹窗", "text-gray-400")
                             except:
                                 pass
                             
@@ -400,6 +424,8 @@ class Api:
                                                 clicked_guide = True
                                 except: pass
                                 if not clicked_guide: break
+                            if self._dismiss_platform_popups(editor_page, wait_ms=500):
+                                self.log(" -> 已清理编辑器浮层提示", "text-gray-400")
                                 
                             # Volume selection
                             if volume_num is not None and volume_num > 1:
@@ -471,10 +497,15 @@ class Api:
                             if not editor.is_visible(): editor = editor_page.locator('[contenteditable="true"]').first
                                 
                             if editor.is_visible():
-                                editor.click(force=True)
-                                editor_page.keyboard.press("Control+A")
-                                editor_page.keyboard.press("Backspace")
-                                editor_page.evaluate("([el, text]) => { el.innerText = text; el.dispatchEvent(new Event('input', {bubbles: true})); }", [editor.element_handle(), content])
+                                self._dismiss_platform_popups(editor_page, wait_ms=500)
+                                editor_handle = editor.element_handle()
+                                editor_page.evaluate("""([el, text]) => {
+                                    el.focus();
+                                    el.innerText = "";
+                                    el.innerText = text;
+                                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                                }""", [editor_handle, content])
                                 editor.click()
                                 editor_page.keyboard.press("End")
                                 editor_page.keyboard.press("Space")
