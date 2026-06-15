@@ -8,14 +8,8 @@ import sys
 import json
 import webview
 from playwright.sync_api import sync_playwright
-from platform_config import (
-    PLATFORM_BOOK_MANAGE_URL, PLATFORM_LOGIN_URL, PLATFORM_SHORT_NAME, PLATFORM_STATE_FILE,
-    CHAPTER_MANAGE_TEXTS, NEW_CHAPTER_TEXTS, NEXT_STEP_TEXTS,
-    FINAL_PUBLISH_TEXTS, SAVE_DRAFT_TEXTS, DISMISS_TEXTS,
-    POPUP_CONTINUE_TEXTS, TITLE_PLACEHOLDERS, BODY_SELECTORS,
-)
 
-STATE_FILE = PLATFORM_STATE_FILE
+STATE_FILE = "state_fanqie.json"
 CONFIG_FILE = "config.json"
 
 
@@ -25,7 +19,7 @@ def archive_uploaded_file(file_path, archive_dir):
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     os.makedirs(archive_dir, exist_ok=True)
     shutil.move(file_path, os.path.join(archive_dir, os.path.basename(file_path)))
-BOOK_MANAGE_URL = PLATFORM_BOOK_MANAGE_URL
+BOOK_MANAGE_URL = "https://fanqienovel.com/main/writer/book-manage"
 
 class Api:
     def __init__(self):
@@ -106,49 +100,6 @@ class Api:
         except:
             pass
         return dismissed
-
-    def _first_visible_text(self, scope, texts, prefer_button=False, exact=True, last=False):
-        for text in texts:
-            locators = []
-            if prefer_button:
-                locators.append(scope.get_by_role("button", name=text).last if last else scope.get_by_role("button", name=text).first)
-            locators.append(scope.get_by_text(text, exact=exact).last if last else scope.get_by_text(text, exact=exact).first)
-            if exact:
-                locators.append(scope.get_by_text(text, exact=False).last if last else scope.get_by_text(text, exact=False).first)
-            for locator in locators:
-                try:
-                    if locator.is_visible():
-                        return locator
-                except Exception:
-                    pass
-        return None
-
-    def _click_first_visible_text(self, scope, texts, prefer_button=False, exact=True):
-        locator = self._first_visible_text(scope, texts, prefer_button=prefer_button, exact=exact)
-        if not locator:
-            raise RuntimeError(f"Entry not found: {'/'.join(texts)}")
-        locator.click(force=True)
-        return True
-
-    def _first_visible_placeholder(self, page, placeholders):
-        for placeholder in placeholders:
-            try:
-                locator = page.get_by_placeholder(placeholder, exact=False).first
-                if locator.is_visible():
-                    return locator
-            except Exception:
-                pass
-        return None
-
-    def _first_visible_selector(self, page, selectors):
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).first
-                if locator.is_visible():
-                    return locator
-            except Exception:
-                pass
-        return None
 
     @staticmethod
     def _chapter_file_sort_key(file_path):
@@ -235,9 +186,9 @@ class Api:
                         context = browser.new_context()
                         
                     page = context.new_page()
-                    self.log("正在强行进入起点工作台...")
+                    self.log("正在强行进入番茄工作台...")
                     try:
-                        page.goto(PLATFORM_LOGIN_URL, timeout=60000)
+                        page.goto("https://fanqienovel.com/main/writer/?enter_from=author_zone", timeout=60000)
                     except Exception as e:
                         pass
                         
@@ -431,7 +382,7 @@ class Api:
                                 
                             page.wait_for_timeout(4000)
                             
-                            # 关闭起点平台新增的"注意平台不允许发布以下内容"提示弹窗
+                            # 关闭番茄平台新增的"注意平台不允许发布以下内容"提示弹窗
                             # 该弹窗可能在章节管理页面加载时弹出，需要先关闭才能继续操作
                             try:
                                 current_active_page = context.pages[-1] if len(context.pages) > 1 else page
@@ -549,7 +500,9 @@ class Api:
                             if title_input.is_visible(): title_input.fill(chapter_title, force=True)
                                 
                             # Body
-                            editor = self._first_visible_selector(editor_page, BODY_SELECTORS)
+                            editor = editor_page.locator('.ql-editor').first
+                            if not editor.is_visible(): editor = editor_page.locator('.ProseMirror').first
+                            if not editor.is_visible(): editor = editor_page.locator('[contenteditable="true"]').first
                                 
                             if editor.is_visible():
                                 self._dismiss_platform_popups(editor_page, wait_ms=500)
@@ -578,11 +531,17 @@ class Api:
                                 
                                 publish_success = False
                                 for attempt in range(15):  # 尝试总时长大约15秒
-                                    # 尝试点击AI选项
+                                    # 在"是否使用AI"弹窗中选择"是"
                                     try:
-                                        ai_no_label = editor_page.get_by_text("否", exact=True).first
-                                        if ai_no_label.is_visible():
-                                            ai_no_label.click(force=True)
+                                        # 优先：点击 arco-radio-text 为 "是" 的元素
+                                        radio_yes = editor_page.locator(".arco-radio-text").filter(has_text="是").first
+                                        if radio_yes.is_visible():
+                                            radio_yes.click(force=True)
+                                        else:
+                                            # 备选：点击第一个 .arco-radio label (DOM顺序：是, 否)
+                                            first_radio = editor_page.locator(".arco-radio").first
+                                            if first_radio.is_visible():
+                                                first_radio.click(force=True)
                                     except: pass
                                     
                                     # 尝试点击最终确认发布
@@ -676,10 +635,10 @@ if __name__ == '__main__':
     else:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         
-    html_path = 'file://' + os.path.join(current_dir, 'web', 'index.html').replace('\\', '/')
+    html_path = 'file://' + os.path.join(current_dir, 'fanqie_web', 'index.html').replace('\\', '/')
     
     window = webview.create_window(
-        '起点发文助手 PRO', 
+        '番茄发文助手 PRO', 
         html_path, 
         js_api=api,
         width=1100, 

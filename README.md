@@ -1,117 +1,189 @@
-# Fanqie Auto Publish (番茄小说全自动发文机器人) 🍅🤖
+# 网文一键发布系统 — Multi-Platform Novel Auto Publish
 
-这是一个基于 `Playwright` 的强大的番茄小说全自动网页端发文与状态管理自动化脚本。
-它能在完全无人值守的情况下，将本地批量的 `.txt` 章节文件精准投递并发布到番茄作家后台，且自带极其强悍的“断点续检”与“弹窗斩杀”机制。
+支持**起点中文网**、**番茄小说**、**飞卢小说**、**七猫小说**、**咪咕文学**五大平台的一键批量发布。
 
-## 核心特性 ✨
+---
 
-- **智能断点续传**：意外中断后重启脚本，不会傻傻地重复创建章节，而是会进入【章节管理】自动识别未完成的残片草稿并继续覆盖发布。
-- **神级弹窗斩杀器**：内置基于物理坐标（Y轴边界过滤）的霸道扫雷机制。不管是“新手引导 1/4”、还是“错别字警告”、“内容风险拦截”，都会被脚本瞬间点爆。
-- **强制合规声明**：在最终发布面板中，脚本能自动拦截并勾选“是否使用AI”的法定单选框，确保发布万无一失。
-- **多书隔离管理**：`chapters/` 下按书名建立子目录（如 `chapters/ai编程末日/`、`chapters/青冥独行录/`），脚本自动扫描并列出有待发章节的书籍，输入序号即可精准发布。发文成功后自动归档到 `uploaded/书名/` 下，多部小说章节永不混乱。
-- **自定义发布数量**：选择小说后可自行指定本次发布的章节数（直接回车发布全部，输入数字则只发布前 N 章），灵活应对番茄平台每日发布上限，未发章节保留原位待下次发布。
-- **封面贴字插件**：附带 `add_text.py` 脚本，可调用 `Pillow` 为 AI 生成的纯净封面图自动加上标准排版的极客风书名（应对审核不合格）。
-
-## 目录结构 📁
-
-_由于涉及个人隐私与作品版权，以下数据目录已被 `.gitignore` 保护，不会被上传：_
-
-```
-chapters/                    # 待发章节（按书名建子目录）
-  ├── ai编程末日/
-  │     ├── 101 第101章.txt
-  │     └── 102 第102章.txt
-  └── 青冥独行录/
-        ├── 001 第1章.txt
-        └── 002 第2章.txt
-uploaded/                    # 已发布归档（自动按书名隔离）
-  ├── ai编程末日/
-  └── 青冥独行录/
-images/                      # 封面原图
-docx/                        # 大纲、策划文档
-```
-
-> **注意**：章节 txt 文件不要直接散放在 `chapters/` 根目录下，必须放在对应书名的子目录中。脚本会自动检测并提示。
-
-## 快速开始 🚀
+## 快速开始
 
 ### 1. 安装依赖
 
 ```bash
-# 安装核心依赖
-pip install playwright pillow
-
-# 下载 Playwright 需要的内置 Chromium 浏览器内核
+pip install playwright
 playwright install chromium
 ```
 
-### 2. 扫码登录 (仅需一次)
-
-第一次使用前，必须先获取您的番茄平台登录状态（Cookie）：
+### 2. 登录平台（每平台只需一次）
 
 ```bash
-python login.py
+python login.py qidian      # 起点
+python login.py fanqie      # 番茄
+python login.py faloo       # 飞卢
+python login.py qimao       # 七猫
+python login.py migu        # 咪咕
 ```
 
-这会弹出一个浏览器界面。请在里面手动进行扫码登录番茄作家后台。
-登录成功后关闭浏览器，目录下会自动生成一个非常重要的隐私状态文件 `state.json`（已被忽略上传）。
+登录后会在项目根目录生成 `state_<平台>.json`，保存 cookie 和登录状态，后续发布时会自动加载，无需重复登录。
 
-### 3. 全自动轰炸式发文
+### 3. 准备章节目录
 
-在 `chapters/` 下按书名创建子目录，将对应的 txt 章节放入：
+```
+chapters/
+  <平台>/
+    <书名>/
+      第1章 标题.txt
+      第2章 标题.txt
+      ...
+```
+
+示例：
+
+```
+chapters/
+  migu/
+    西域少年行，风雪定山河/
+      第1章 风雪驿铃.txt
+      第2章 半符托孤.txt
+  qidian/
+    我的小说/
+      第1章 开篇.txt
+```
+
+> 章节文件命名需包含"第N章"，如 `第1章 xxx.txt`、`第01章 xxx.txt`，系统按章节号自然排序发布。
+
+### 4. 发布
 
 ```bash
-# 示例：为两本书分别准备章节
-mkdir chapters/我的第一本书
-mkdir chapters/我的第二本书
-# 然后把 txt 文件分别放进去
+# 交互模式（会让你选书、选数量）
+python platforms/migu.py
+
+# 无人值守模式 — 发布全部章节
+python platforms/migu.py --headless --no-prompt
+
+# 发布指定数量
+python platforms/migu.py --count 1 --headless --no-prompt
+
+# 指定书名 + 发布 N 章
+python platforms/migu.py --book "西域少年行，风雪定山河" --count 3 --headless --no-prompt
 ```
 
-一键执行大魔王：
-
-```bash
-python publish.py
-```
-
-脚本会自动扫描并列出所有有待发章节的书籍：
-
-```
-检测到以下小说有待发章节：
-
-  [1] 我的第一本书  （5 章待发）
-  [2] 我的第二本书  （3 章待发）
-
->>> 请输入序号选择要发布的小说：
-```
-
-输入序号后，脚本会进一步询问本次要发布的章节数量：
-
-```
-已选择：【我的第一本书】，共 5 章待发
-==================================================
-
->>> 请输入本次要发布的章节数量（1-5），直接回车则发布全部：
-```
-
-- **直接按回车**：发布该小说所有待发章节
-- **输入数字**（如 `3`）：只发布排序最靠前的 3 章，剩余章节保留待下次发布
-
-这样就可以灵活控制每次的发布量，完美应对番茄平台的每日发布上限。输入完毕后就可以双手离开键盘，喝着咖啡欣赏它像一个没有感情的打字机般疯狂投递了。
+发布成功后，txt 文件会自动归档到 `uploaded/<平台>/<书名>/` 目录。
 
 ---
 
-## 交流与支持 💬
+## 命令行参数
 
-如果在自动化发文途中遇到了平台规则更新或环境报错，亦或者想要交流 AI 写小说的最新干货技巧，欢迎加入我们的**专属讨论阵地**：
-👉 **[点击链接加入群聊【AI交流群】](https://qm.qq.com/q/YBb6naAOcM)**
+| 参数 | 说明 | 默认值 |
+|---|---|---|
+| `--book BOOK` | 指定书名（文件夹名），不指则自动选第一本或交互选择 | — |
+| `--count N` | 发布 N 章，不指则发布全部 | 全部 |
+| `--volume N` | 归档到第 N 卷子目录 | 不分子卷 |
+| `--no-prompt` | 无人值守模式，不等待用户输入 | 交互模式 |
+| `--headless` | 后台运行，不显示浏览器窗口 | 显示浏览器 |
 
-如果这个超神自动化工具真正帮您解放了双手，帮您顺利度过了新手期并拿到了全勤和首秀打赏，欢迎请作者喝一杯防猝死的冰美式！您的所有充电和支持，都是本脚本持续对抗番茄防线更新的最强核动力！☕️🔋
+### 各平台入口
 
-<div align="center">
-  <img src="https://anta.obs.cn-south-1.myhuaweicloud.com/IMG_0897.JPG" width="250" height="auto" style="margin-right: 20px" alt="微信赞赏码">
-  <img src="https://anta.obs.cn-south-1.myhuaweicloud.com/IMG_0896.JPG" width="250" height="auto" alt="其它打赏码">
-</div>
+```bash
+python platforms/migu.py   [参数]    # 咪咕文学
+python publish.py --platform qidian [参数]    # 起点中文网
+python publish.py --platform fanqie [参数]    # 番茄小说
+python publish.py --platform faloo  [参数]    # 飞卢小说
+python publish.py --platform qimao  [参数]    # 七猫小说
+```
 
 ---
 
-**⚠️ 免责声明**：本脚本纯属技术交流与自动化接口研究。因平台规则随时可能更新，请时刻留意 UI 变动。不要用作恶意批量发布垃圾内容。
+## 项目结构
+
+```
+novel_auto_publish/
+├── publish.py              # 核心发布引擎（Playwright 自动化）
+├── login.py                # 统一登录入口
+├── platform_config.py      # 各平台配置（URL、按钮文本、选择器）
+├── platform_utils.py       # 平台工具函数
+├── anti_detect.py          # 反检测浏览器启动
+├── main_webview.py         # WebView 桌面应用
+│
+├── platforms/              # 平台入口脚本
+│   ├── migu.py             # 咪咕一键发布
+│   ├── migu_login.py       # 咪咕登录
+│   ├── fanqie_publish.py   # 番茄发布
+│   ├── fanqie_login.py     # 番茄登录
+│   └── ...
+│
+├── chapters/               # 待发布章节（按平台→书名组织）
+│   ├── migu/
+│   ├── qidian/
+│   ├── fanqie/
+│   ├── faloo/
+│   └── qimao/
+│
+├── uploaded/               # 已发布归档（自动移入）
+│   ├── migu/
+│   ├── qidian/
+│   └── ...
+│
+├── debug/                  # 调试截图和 HTML（发布过程中自动保存）
+├── logs/                   # 定时任务日志
+│
+├── state_migu.json         # 咪咕登录态
+├── state_qidian.json       # 起点登录态
+├── state_fanqie.json       # 番茄登录态
+├── state_faloo.json        # 飞卢登录态
+└── state_qimao.json        # 七猫登录态
+```
+
+---
+
+## 定时任务（Windows 任务计划程序）
+
+创建计划任务，每天定时自动发布：
+
+```
+操作：启动程序
+程序：python
+参数：platforms/migu.py --headless --no-prompt --count 2
+起始于：D:\BaiduSyncdisk\coding\novel_auto_publish
+```
+
+日志输出到 `logs/scheduled_publish.log`。
+
+---
+
+## 调试
+
+如果发布失败，检查 `debug/` 目录下的截图和 HTML：
+
+| 文件 | 说明 |
+|---|---|
+| `book_manage_page.png` | 作品管理页面 |
+| `write_page_after_entry.png/html` | 进入编辑器后 |
+| `after_fill_before_publish.png/html` | 填写标题和正文后 |
+| `migu_after_publish_click.png/html` | 点击发布按钮后 |
+| `migu_publish_unverified.png/html` | 发布验证失败时的页面 |
+
+不带 `--headless` 运行可以看到浏览器实时操作过程：
+
+```bash
+python platforms/migu.py --count 1 --no-prompt
+```
+
+---
+
+## 常见问题
+
+**Q: 提示 "Login state not found"？**
+
+先运行 `python login.py <平台>` 登录一次，会生成对应的 `state_*.json` 文件。
+
+**Q: 登录状态过期了？**
+
+重新运行 `python login.py <平台>`，在弹出浏览器中重新登录即可刷新 cookie。
+
+**Q: 章节顺序不对？**
+
+确保文件名包含"第N章"，系统按章节号自然排序，不是按文件名排序。
+
+**Q: 咪咕发布后提示定时发布对话框？**
+
+系统已自动处理咪咕的两层确认对话框（字数确认 → 定时发布），无需手动操作。如果仍有问题，去掉 `--headless` 观察实际页面情况。

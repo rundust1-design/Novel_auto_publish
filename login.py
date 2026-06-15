@@ -1,42 +1,74 @@
+﻿import argparse
 import os
 from playwright.sync_api import sync_playwright
+from platform_config import DEFAULT_PLATFORM, get_platform
+from platform_utils import attach_dialog_handler, detect_web_security_block, dismiss_platform_popups
+from anti_detect import launch_anti_detect_browser, create_anti_detect_context
 
-STATE_FILE = "state.json"
 
-def login():
-    print("准备启动浏览器...")
+def resolve_existing_state_file(platform):
+    candidates = [platform["state_file"], *platform.get("fallback_state_files", [])]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def login(platform_key=DEFAULT_PLATFORM, headless=False):
+    if platform_key == "fanqie" and not headless:
+        from platforms.fanqie_login import login as fanqie_login
+        return fanqie_login()
+
+    platform = get_platform(platform_key)
+    state_file = platform["state_file"]
+    existing_state_file = resolve_existing_state_file(platform)
+
+    print(f"Starting browser for {platform.get('product_name', platform['key'])}...")
     with sync_playwright() as p:
-        # 打开 Chromium 浏览器，非无头模式（需要您看到界面扫码）
-        browser = p.chromium.launch(headless=False)
-        
-        if os.path.exists(STATE_FILE):
-            print(f"找到已有的 {STATE_FILE}，将加载现有登录状态尝试打开...")
-            context = browser.new_context(storage_state=STATE_FILE)
+        browser = launch_anti_detect_browser(p, headless=headless)
+        if existing_state_file:
+            print(f"Found {existing_state_file}; loading existing login state...")
+            context = create_anti_detect_context(browser, storage_state=existing_state_file)
         else:
-            context = browser.new_context()
-            
+            context = create_anti_detect_context(browser)
+
         page = context.new_page()
-        
-        print("正在打开番茄小说作家后台...")
+        attach_dialog_handler(page)
+        print(f"Opening {platform.get('product_name', platform['key'])} writer backend...")
         try:
-            page.goto("https://fanqienovel.com/main/writer/?enter_from=author_zone", timeout=60000)
+            page.goto(platform["login_url"], timeout=60000)
         except Exception as e:
-            print(f"打开网页遇到问题，请检查网络: {e}")
-            print("浏览器仍然保持打开，您可以手动在地址栏输入 https://fanqienovel.com/writer")
-        
-        print("\n" + "="*50)
-        print("请在弹出的浏览器窗口中登录您的账号（可以密码、验证码或扫码登录）。")
-        print("如果您已经登录完成，并且看到了作家后台首页，请回到这个黑框/终端里按【回车键】！")
-        print("="*50 + "\n")
-        
-        input(">>> 确认登录完成后，请按回车键以保存登录状态并退出：")
-        
-        # 保存 Cookies 和 Local Storage 等状态
-        context.storage_state(path=STATE_FILE)
-        print(f"\n登录状态已成功保存到当前目录下的 {STATE_FILE} 文件中！")
-        print("以后运行自动发布脚本时，会自动加载这个文件，无需再次手动登录。")
-        
+            print(f"Failed to open page, please check network: {e}")
+            print(f"Browser remains open; manually visit {platform['login_url']} if needed.")
+
+        print("\n" + "=" * 50)
+        print(f"Please log in to your {platform.get('product_name', platform['key'])} writer account in the browser.")
+        print("After the writer dashboard appears, return here and press Enter to save state.")
+        print("=" * 50 + "\n")
+
+        input(">>> Press Enter after login is complete: ")
+        try:
+            if platform["key"] == "faloo":
+                page.goto(platform["book_manage_url"], timeout=60000)
+                page.wait_for_load_state("domcontentloaded", timeout=30000)
+                page.wait_for_timeout(2000)
+                detect_web_security_block(page)
+                dismiss_platform_popups(page, platform)
+        except Exception as exc:
+            print(f"[WARN] Failed to verify writer backend before saving state: {exc}")
+        context.storage_state(path=state_file)
+        print(f"\nLogin state saved to {state_file}.")
+        print("Future publish runs will load this state automatically.")
         browser.close()
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Save writer backend login state.")
+    parser.add_argument("platform", nargs="?", default=DEFAULT_PLATFORM, help="Platform key, e.g. qidian, fanqie, faloo, or qimao.")
+    parser.add_argument("--headless", action="store_true", help="Run browser headless. Not recommended for manual login.")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    login()
+    args = parse_args()
+    login(args.platform, headless=args.headless)
