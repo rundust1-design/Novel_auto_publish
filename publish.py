@@ -450,6 +450,162 @@ def choose_book(books, book_name, no_prompt):
 
 
 def open_chapter_manager(page, platform, book_name):
+    # Ciweimao-specific flow: navigate through the author dashboard
+    if platform.get("key") == "ciweimao":
+        last_error = None
+        # Step 1: Go to the main author page and click "作品管理" ("作品管理")
+        page.goto(platform["login_url"], timeout=60000)
+        page.wait_for_load_state("domcontentloaded", timeout=60000)
+        page.wait_for_timeout(3000)
+        detect_web_security_block(page, platform, "ciweimao_main_blocked")
+        dismiss_platform_popups(page, platform)
+        print(f"Locating '作品管理' button on ciweimao main page: {page.url}")
+        for btn_text in ["作品管理", "作品", "我的作品"]:
+            zuopin_btn = page.get_by_text(btn_text, exact=False).first
+            try:
+                if zuopin_btn.is_visible():
+                    zuopin_btn.click(force=True)
+                    page.wait_for_timeout(5000)
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=30000)
+                    except Exception:
+                        pass
+                    dismiss_platform_popups(page, platform)
+                    print(f"Clicked '作品管理', now on page: {page.url}")
+                    break
+            except Exception:
+                continue
+        else:
+            # Fallback: go directly to book_manage_url if "作品管理" not found
+            print("'作品管理' not found, navigating directly to book manage URL")
+            try:
+                page.goto(platform["book_manage_url"], timeout=60000)
+                page.wait_for_load_state("domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
+                dismiss_platform_popups(page, platform)
+            except Exception as exc:
+                last_error = exc
+
+        # Step 2: Ciweimao is a SPA — the homepage is just a navigation shell.
+        # The book list lives at book_manage/view_list (loaded via iframe on the SPA).
+        # We navigate to it directly instead of dealing with the iframe.
+        page.goto("https://author.ciweimao.com/book_manage/view_list", timeout=60000)
+        page.wait_for_load_state("domcontentloaded", timeout=60000)
+        page.wait_for_timeout(5000)
+        dismiss_platform_popups(page, platform)
+
+        # The view_list page has a table; find the row matching book_name and
+        # click its "上传章节" link pointing to /book_manage/draft?book_id=NNN.
+        book_found = False
+        for attempt in range(4):
+            if attempt > 0:
+                page.wait_for_timeout(2000)
+
+            # --- Method A: locate the <tr> containing book_name, click "上传章节" inside it ---
+            rows = page.locator('tr').filter(has_text=book_name)
+            row_count = rows.count()
+            print(f"Found {row_count} book row(s) matching '{book_name}' on view_list")
+
+            for idx in range(row_count):
+                try:
+                    row = rows.nth(idx)
+                    if not row.is_visible():
+                        continue
+                    for upload_text in ["上传章节", "上传"]:
+                        links = row.locator('a').filter(has_text=upload_text)
+                        for li in range(links.count()):
+                            link = links.nth(li)
+                            if link.is_visible():
+                                link.click(force=True)
+                                page.wait_for_timeout(5000)
+                                try:
+                                    page.wait_for_load_state("domcontentloaded", timeout=15000)
+                                except Exception:
+                                    pass
+                                current = page.url.lower()
+                                if any(kw in current for kw in ["draft", "chapter", "book_id"]):
+                                    book_found = True
+                                    break
+                        if book_found:
+                            break
+                except Exception:
+                    continue
+                if book_found:
+                    break
+            if book_found:
+                break
+
+            # --- Method B: JS fallback — find tr by text, click upload inside same row ---
+            try:
+                result = page.evaluate(f"""(bookName) => {{
+                    const rows = document.querySelectorAll('tr');
+                    for (const row of rows) {{
+                        if (row.textContent.indexOf(bookName) === -1) continue;
+                        const links = row.querySelectorAll('a');
+                        for (const link of links) {{
+                            const text = (link.textContent || '').trim();
+                            if (text === '上传章节' || text === '上传') {{
+                                link.click();
+                                return JSON.stringify({{clicked: true, tag: 'a', text: text, href: link.href}});
+                            }}
+                        }}
+                    }}
+                    return JSON.stringify({{clicked: false}});
+                }}""", book_name)
+                js_result = json.loads(result)
+                if js_result.get("clicked"):
+                    page.wait_for_timeout(5000)
+                    try:
+                        page.wait_for_load_state("domcontentloaded", timeout=15000)
+                    except Exception:
+                        pass
+                    current = page.url.lower()
+                    if any(kw in current for kw in ["draft", "chapter", "book_id"]):
+                        book_found = True
+                        break
+            except Exception:
+                pass
+            if book_found:
+                break
+
+            # --- Method C: last resort — click any "上传章节" link anywhere ---
+            for upload_text in ["上传章节", "上传"]:
+                try:
+                    all_links = page.locator('a').filter(has_text=upload_text)
+                    count = all_links.count()
+                    print(f"Found {count} '{upload_text}' links on page (fallback)")
+                    for li in range(count):
+                        link = all_links.nth(li)
+                        if link.is_visible():
+                            link.click(force=True)
+                            page.wait_for_timeout(5000)
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+                            current = page.url.lower()
+                            if any(kw in current for kw in ["draft", "chapter", "book_id"]):
+                                book_found = True
+                                break
+                    if book_found:
+                        break
+                except Exception:
+                    continue
+            if book_found:
+                break
+
+        # --- Security check (non-fatal) ---
+        try:
+            detect_web_security_block(page, platform, "book_manage_blocked")
+        except RuntimeError as e:
+            print(f"[WARN] Security block detected but continuing: {e}")
+
+        if book_found:
+            print(f"Entered chapter management: {page.url}")
+            return page
+
+        raise RuntimeError(f"chapter manager entry not found for book: {book_name}; last_error={last_error}")
+
     urls = [platform["book_manage_url"]]
     for fallback_url in platform.get("book_manage_fallback_urls", []):
         if fallback_url not in urls:
@@ -534,6 +690,127 @@ def _try_open_chapter_manager_on_current_page(page, platform, book_name):
                 page.wait_for_timeout(2000)
                 if "\u7ae0\u8282\u7ba1\u7406" in page.content():
                     return page
+            except Exception:
+                pass
+
+    if platform.get("key") == "ciweimao":
+        # Ciweimao author homepage after clicking "作品管理":
+        # The page shows a book list table with action links on the far right
+        # in an "操作" (action) column. The buttons may be tiny text links.
+        # Strategy 1: search the whole page for upload/manage buttons with broader matching
+        for btn_text in ["上传章节", "上传", "新建章节", "新增章节", "写新章节", "管理章节", "查看目录", "章节管理", "写作"]:
+            try:
+                # Try clicking links or buttons first
+                entries = page.locator('a, button, span, div[onclick]').filter(has_text=btn_text)
+                for i in range(entries.count()):
+                    entry = entries.nth(i)
+                    if entry.is_visible():
+                        print(f"Found '{btn_text}' via locator filter, clicking...")
+                        entry.click(force=True)
+                        page.wait_for_timeout(4000)
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+                        print(f"Clicked '{btn_text}', now on: {page.url}")
+                        return page
+            except Exception:
+                continue
+
+        for btn_text in ["上传章节", "上传", "新建章节", "新增章节", "写新章节", "管理章节", "查看目录", "章节管理", "写作"]:
+            try:
+                entries = page.get_by_text(btn_text, exact=False)
+                for i in range(entries.count()):
+                    entry = entries.nth(i)
+                    if entry.is_visible():
+                        print(f"Found '{btn_text}' via get_by_text, clicking...")
+                        entry.click(force=True)
+                        page.wait_for_timeout(4000)
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+                        print(f"Clicked '{btn_text}', now on: {page.url}")
+                        return page
+            except Exception:
+                continue
+
+        # Strategy 2: find the "操作" column rows and click the first available action link
+        # The table rows may contain the book name and action links
+        rows = page.locator('tr, li').filter(has_text=book_name)
+        for idx in range(rows.count() - 1, -1, -1):
+            try:
+                row = rows.nth(idx)
+                if not row.is_visible():
+                    continue
+                # In the same row, find any action link
+                for btn_text in ["上传", "上传章节", "管理", "写作", "新建", "新增"]:
+                    entry = row.get_by_text(btn_text, exact=False).first
+                    if entry.is_visible():
+                        print(f"Found '{btn_text}' in book row, clicking...")
+                        entry.click(force=True)
+                        page.wait_for_timeout(4000)
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+                        print(f"Clicked '{btn_text}' in row, now on: {page.url}")
+                        return page
+            except Exception:
+                pass
+
+        # Strategy 3: find the book card and click buttons inside it
+        cards = page.locator('div, li, section, article, tr').filter(has_text=book_name)
+        for idx in range(cards.count() - 1, -1, -1):
+            try:
+                card = cards.nth(idx)
+                if not card.is_visible():
+                    continue
+                card.hover(timeout=3000)
+                page.wait_for_timeout(800)
+                for btn_text in ["上传章节", "上传", "新建章节", "管理章节", "查看目录", "章节管理", "写作"]:
+                    entry = card.get_by_text(btn_text, exact=False).first
+                    if entry.is_visible():
+                        print(f"Found '{btn_text}' inside book card, clicking...")
+                        entry.click(force=True)
+                        page.wait_for_timeout(4000)
+                        try:
+                            page.wait_for_load_state("domcontentloaded", timeout=15000)
+                        except Exception:
+                            pass
+                        return page
+            except Exception:
+                pass
+
+        # Strategy 4: click the book card title/link to enter the book detail page
+        for idx in range(cards.count() - 1, -1, -1):
+            try:
+                card = cards.nth(idx)
+                if not card.is_visible():
+                    continue
+                # Try clicking a link inside the card first
+                link = card.locator('a').first
+                if link.is_visible():
+                    link.click(force=True)
+                else:
+                    card.click(force=True)
+                page.wait_for_timeout(4000)
+                if "book" in page.url or "chapter" in page.url:
+                    return page
+                # After entering the book page, try upload buttons again
+                for btn_text in ["上传章节", "上传", "管理章节", "新建章节", "写作"]:
+                    try:
+                        btn = page.get_by_text(btn_text, exact=False).first
+                        if btn.is_visible():
+                            btn.click(force=True)
+                            page.wait_for_timeout(4000)
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=15000)
+                            except Exception:
+                                pass
+                            return page
+                    except Exception:
+                        continue
             except Exception:
                 pass
 
@@ -623,8 +900,8 @@ def fill_editor(page, platform, chapter_num, chapter_title, content):
     if chapter_num and not re.search(r"^\s*\u7b2c\s*\d+", full_title):
         full_title = f"\u7b2c{chapter_num}\u7ae0 {full_title}".strip()
 
-    # Fanqie auto-fills the chapter number prefix; strip it to avoid duplication
-    if platform.get("key") == "fanqie":
+    # Fanqie / Haiduxiaoshuo auto-fills the chapter number prefix; strip it to avoid duplication
+    if platform.get("key") in ("fanqie", "haiduxiaoshuo"):
         chapter_title = re.sub(r"第\s*\d+\s*章\s*", "", chapter_title).strip()
     title_value = full_title if platform.get("key") == "faloo" else chapter_title
 
@@ -731,6 +1008,85 @@ def fill_editor(page, platform, chapter_num, chapter_title, content):
             return
     except Exception as exc:
         print(f"[WARN] TinyMCE iframe fill failed, fallback to generic editor: {exc}")
+
+    # --- KindEditor (ciweimao uses .ke-edit-iframe) ---
+    try:
+        kindeditor_iframe = page.locator(".ke-edit-iframe").first
+        if kindeditor_iframe.is_visible():
+            print("[DEBUG] Filling via KindEditor (.ke-edit-iframe)")
+            paragraphs = [line.strip() for line in content.splitlines() if line.strip()]
+            # Try KindEditor JS API first
+            try:
+                page.evaluate("""(paragraphs) => {
+                    const html = paragraphs.map(p => '<p>' + p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</p>').join('');
+                    // Try KindEditor API
+                    if (typeof KindEditor !== 'undefined' && KindEditor.instances) {
+                        for (const k in KindEditor.instances) {
+                            KindEditor.instances[k].html(html);
+                            return;
+                        }
+                    }
+                    // Fallback: use iframe body directly
+                    const iframe = document.querySelector('.ke-edit-iframe');
+                    if (iframe && iframe.contentDocument) {
+                        const body = iframe.contentDocument.body;
+                        body.innerHTML = html;
+                    }
+                }""", paragraphs)
+            except Exception as e:
+                print(f"[WARN] KindEditor API failed, trying iframe body: {e}")
+                # Direct iframe body access
+                body = page.frame_locator(".ke-edit-iframe").locator("body").first
+                body.evaluate("""(el, paragraphs) => {
+                    el.innerHTML = '';
+                    for (const para of paragraphs) {
+                        const p = document.createElement('p');
+                        p.textContent = para;
+                        el.appendChild(p);
+                    }
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }""", paragraphs)
+            # Also sync to the hidden textarea
+            try:
+                page.evaluate("""() => {
+                    const ta = document.querySelector('.ke-edit-textarea');
+                    if (ta && typeof KindEditor !== 'undefined' && KindEditor.instances) {
+                        for (const k in KindEditor.instances) {
+                            KindEditor.instances[k].sync();
+                        }
+                    }
+                }""")
+            except Exception:
+                pass
+            return
+    except Exception as exc:
+        print(f"[WARN] KindEditor fill failed: {exc}")
+
+    # --- ciweimao: try additional selectors if KindEditor didn't match ---
+    for selector in [".ql-editor", ".ProseMirror", '[contenteditable="true"]', "#content", "textarea"]:
+        try:
+            candidate = page.locator(selector).first
+            if candidate.is_visible():
+                candidate.evaluate("""(el, text) => {
+                    el.focus();
+                    if ('value' in el) {
+                        el.value = text;
+                    } else {
+                        el.innerHTML = '';
+                        const lines = text.split('\\n').filter(l => l.trim());
+                        for (const line of lines) {
+                            const p = document.createElement('p');
+                            p.textContent = line;
+                            el.appendChild(p);
+                        }
+                    }
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }""", content)
+                return
+        except Exception:
+            continue
 
     editor = qimao_body_editor(page) if platform.get("key") == "qimao" else first_visible_selector(page, platform["body_selectors"])
     if not editor:
@@ -1355,8 +1711,8 @@ def verify_publish_result(page, platform, chapter_title=None, timeout_ms=15000):
             url = page.url
             if platform.get("key") == "qimao" and "book-manage/manage" in url:
                 return True, f"qimao returned to book manage page after publish: {url}"
-            if platform.get("key") == "fanqie" and "book-manage" in url and "book-upload" not in url:
-                return True, f"fanqie returned to book manage page after publish: {url}"
+            if platform.get("key") == "fanqie" and ("book-manage" in url or "chapter-manage" in url) and "book-upload" not in url:
+                return True, f"fanqie returned to book/chapter manage page after publish: {url}"
             # Qidian: after publish redirects to chapter list with "/chapter/" in the URL
             if platform.get("key") == "qidian" and ("/chapter/" in url or "/portal/book/" in url):
                 return True, f"qidian returned to chapter list after publish: {url}"
@@ -1370,6 +1726,19 @@ def verify_publish_result(page, platform, chapter_title=None, timeout_ms=15000):
                     compact_body = re.sub(r"\s+", "", body_text)
                     if any(kw in compact_body for kw in ["已发布章节", "草稿箱", "定时发布"]):
                         return True, f"migu returned to book manage after publish: {url}"
+            # Ciweimao + Haiduxiaoshuo: after publish, URL typically changes from editor to
+            # chapter list (/chapter) or book detail page. Also check for success text.
+            if platform.get("key") in ("ciweimao", "haiduxiaoshuo"):
+                if "/chapter" in url or "/book" in url:
+                    return True, f"{platform['key']} redirected after publish: {url}"
+                # Also check body for success toast/message
+                try:
+                    body_text = page.locator("body").inner_text(timeout=1000)
+                    compact_body = re.sub(r"\s+", "", body_text)
+                    if any(kw in compact_body for kw in ["发布成功", "发表成功", "提交成功", "审核中", "已发布"]):
+                        return True, f"{platform['key']} success text detected: {url}"
+                except Exception:
+                    pass
             if any(token in url for token in ["chapter", "draft", "publish", "editor"]):
                 body_text = page.locator("body").inner_text(timeout=1000)
                 compact_body = re.sub(r"\s+", "", body_text)
@@ -1381,8 +1750,8 @@ def verify_publish_result(page, platform, chapter_title=None, timeout_ms=15000):
         page.wait_for_timeout(1000)
     if platform.get("key") == "qimao" and "book-manage/manage" in page.url:
         return True, f"qimao returned to book manage page after publish: {page.url}"
-    if platform.get("key") == "fanqie" and "book-manage" in page.url and "book-upload" not in page.url:
-        return True, f"fanqie returned to book manage page after publish: {page.url}"
+    if platform.get("key") == "fanqie" and ("book-manage" in page.url or "chapter-manage" in page.url) and "book-upload" not in page.url:
+        return True, f"fanqie returned to book/chapter manage page after publish: {page.url}"
     if platform.get("key") == "qidian" and ("/chapter/" in page.url or "/portal/book/" in page.url):
         return True, f"qidian returned to chapter list after publish: {page.url}"
     if platform.get("key") == "migu":
@@ -1394,6 +1763,16 @@ def verify_publish_result(page, platform, chapter_title=None, timeout_ms=15000):
                     return True, f"migu returned to book manage after publish: {page.url}"
             except Exception:
                 pass
+    if platform.get("key") in ("ciweimao", "haiduxiaoshuo"):
+        if "/chapter" in page.url or "/book" in page.url:
+            return True, f"{platform['key']} redirected after publish: {page.url}"
+        try:
+            body_text = page.locator("body").inner_text(timeout=1000)
+            compact_body = re.sub(r"\s+", "", body_text)
+            if any(kw in compact_body for kw in ["发布成功", "发表成功", "提交成功", "审核中", "已发布"]):
+                return True, f"{platform['key']} success text detected: {page.url}"
+        except Exception:
+            pass
     return False, f"{platform['key']} publish result was not verified"
 
 
@@ -1526,6 +1905,44 @@ def _migu_handle_publish_confirm(page, timeout_ms=5000):
 
 
 def publish_current_editor(page, platform, no_prompt):
+    # --- Ant Design (haiduxiaoshuo): buttons have spaces like "发 布", "保 存" ---
+    # Use CSS class selectors instead of text matching.
+    if platform.get("key") == "haiduxiaoshuo":
+        publish_btn = page.locator("button.ant-btn-primary").first
+        try:
+            if publish_btn.is_visible() and publish_btn.is_enabled():
+                before_url = page.url
+                publish_btn.click(force=True)
+                page.wait_for_timeout(4000)
+                # Check for success toast/message (Ant Design ant-message)
+                verified, reason = verify_publish_result(page, platform, chapter_title=platform.get("current_chapter_title"))
+                print(f"[INFO] haiduxiaoshuo publish verification: {reason}; before_url={before_url}; after_url={page.url}")
+                if verified:
+                    return "published"
+                # Maybe a confirmation dialog appeared — try clicking confirm
+                for confirm_text in ["确定", "确认", "提交", "确 定"]:
+                    try:
+                        confirm_btn = page.get_by_text(confirm_text, exact=False).first
+                        if confirm_btn.is_visible():
+                            confirm_btn.click(force=True)
+                            page.wait_for_timeout(3000)
+                            verified, reason = verify_publish_result(page, platform, chapter_title=platform.get("current_chapter_title"))
+                            if verified:
+                                print(f"[INFO] haiduxiaoshuo publish verification (after confirm): {reason}")
+                                return "published"
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[WARN] haiduxiaoshuo publish failed: {e}")
+        if no_prompt:
+            raise RuntimeError("haiduxiaoshuo publish button not found or publish not verified")
+        input("Manually finish haiduxiaoshuo publish in browser, then press Enter here: ")
+        verified, reason = verify_publish_result(page, platform, chapter_title=platform.get("current_chapter_title"))
+        print(f"[INFO] haiduxiaoshuo manual publish verification: {reason}")
+        if verified:
+            return "published"
+        raise RuntimeError(f"haiduxiaoshuo manual publish was not verified: {reason}")
+
     if platform.get("key") == "faloo":
         button = None
         for text in ["\u6dfb\u52a0\u5c0f\u8bf4\u7ae0\u8282", "\u4fee\u6539\u5c0f\u8bf4\u7ae0\u8282", "\u53d1\u5e03\u5c0f\u8bf4\u7ae0\u8282", "\u63d0\u4ea4\u5c0f\u8bf4\u7ae0\u8282"]:
@@ -1591,7 +2008,7 @@ def publish_current_editor(page, platform, no_prompt):
                 print(f"[WARN] Migu text-based publish click failed: {exc}")
 
     next_button = None
-    if platform.get("key") == "fanqie":
+    if platform.get("key") in ("fanqie", "haiduxiaoshuo"):
         for selector in ["button.auto-editor-next", ".auto-editor-next", "button.publish-button"]:
             try:
                 candidate = page.locator(selector).first

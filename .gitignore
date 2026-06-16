@@ -6,7 +6,14 @@ docx/
 
 # 账号敏感登录凭据 (极其重要，绝对不可上传！)
 state.json
+state_*.json
 config.json
+
+# 本地调试和日志
+debug/
+logs/
+.workbuddy/
+bat/
 
 # Python 及环境相关
 __pycache__/
