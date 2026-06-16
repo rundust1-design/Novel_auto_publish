@@ -1,6 +1,6 @@
 # 网文一键发布系统 — Multi-Platform Novel Auto Publish
 
-支持**起点中文网**、**番茄小说**、**飞卢小说**、**七猫小说**、**咪咕文学**五大平台的一键批量发布。
+支持**起点中文网**、**番茄小说**、**飞卢小说**、**七猫小说**、**咪咕文学**、**刺猬猫**、**海读文学**七大平台的一键批量发布。
 
 ---
 
@@ -21,6 +21,8 @@ python login.py fanqie      # 番茄
 python login.py faloo       # 飞卢
 python login.py qimao       # 七猫
 python login.py migu        # 咪咕
+python login.py ciweimao    # 刺猬猫
+python login.py haiduxiaoshuo  # 海读文学
 ```
 
 登录后会在项目根目录生成 `state_<平台>.json`，保存 cookie 和登录状态，后续发布时会自动加载，无需重复登录。
@@ -89,6 +91,8 @@ python publish.py --platform qidian [参数]    # 起点中文网
 python publish.py --platform fanqie [参数]    # 番茄小说
 python publish.py --platform faloo  [参数]    # 飞卢小说
 python publish.py --platform qimao  [参数]    # 七猫小说
+python publish.py --platform ciweimao [参数]  # 刺猬猫
+python publish.py --platform haiduxiaoshuo [参数]  # 海读文学
 ```
 
 ---
@@ -109,6 +113,10 @@ novel_auto_publish/
 │   ├── migu_login.py       # 咪咕登录
 │   ├── fanqie_publish.py   # 番茄发布
 │   ├── fanqie_login.py     # 番茄登录
+│   ├── ciweimao.py         # 刺猬猫一键发布
+│   ├── ciweimao_login.py   # 刺猬猫登录
+│   ├── haiduxiaoshuo.py    # 海读文学一键发布
+│   ├── haiduxiaoshuo_login.py  # 海读文学登录
 │   └── ...
 │
 ├── chapters/               # 待发布章节（按平台→书名组织）
@@ -116,11 +124,15 @@ novel_auto_publish/
 │   ├── qidian/
 │   ├── fanqie/
 │   ├── faloo/
+│   ├── ciweimao/
+│   ├── haiduxiaoshuo/
 │   └── qimao/
 │
 ├── uploaded/               # 已发布归档（自动移入）
 │   ├── migu/
 │   ├── qidian/
+│   ├── ciweimao/
+│   ├── haiduxiaoshuo/
 │   └── ...
 │
 ├── debug/                  # 调试截图和 HTML（发布过程中自动保存）
@@ -130,6 +142,8 @@ novel_auto_publish/
 ├── state_qidian.json       # 起点登录态
 ├── state_fanqie.json       # 番茄登录态
 ├── state_faloo.json        # 飞卢登录态
+├── state_ciweimao.json     # 刺猬猫登录态
+├── state_haiduxiaoshuo.json  # 海读文学登录态
 └── state_qimao.json        # 七猫登录态
 ```
 
