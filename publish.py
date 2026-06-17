@@ -2236,12 +2236,14 @@ def _fanqie_goto_new_chapter(page, platform, button_locator):
         button_locator.click(force=True)
 
 
-def publish_chapter(context, page, platform, book_name, file_path, archive_dir, no_prompt):
+def publish_chapter(context, page, platform, book_name, file_path, archive_dir, no_prompt, progress_cb=None):
     chapter_num, chapter_title, content = parse_chapter(file_path)
     print(f"Publishing: chapter {chapter_num} {chapter_title} ({os.path.basename(file_path)})")
     original_pages = len(context.pages)
     manager_page = open_chapter_manager(page, platform, book_name)
     editor_page = context.pages[-1] if len(context.pages) > original_pages else manager_page
+    if progress_cb:
+        progress_cb("chapter_navigate", {"chapter_num": chapter_num, "chapter_title": chapter_title})
     if not wait_for_editor_or_content(editor_page, platform, timeout_ms=30000):
         print("[WARN] Editor did not become ready within timeout")
     if platform.get("key") == "faloo" and not wait_for_faloo_chapter_form(editor_page, timeout_ms=30000):
@@ -2287,10 +2289,14 @@ def publish_chapter(context, page, platform, book_name, file_path, archive_dir, 
         raise RuntimeError("Faloo chapter form disappeared before fill")
     fill_editor(editor_page, platform, chapter_num, chapter_title, content)
     editor_page.wait_for_timeout(1000)
+    if progress_cb:
+        progress_cb("chapter_fill", {"chapter_num": chapter_num, "chapter_title": chapter_title})
     platform["current_chapter_title"] = chapter_title
     filename = os.path.basename(file_path)
     try:
         try:
+            if progress_cb:
+                progress_cb("chapter_publish", {"chapter_num": chapter_num, "chapter_title": chapter_title})
             result = publish_current_editor(editor_page, platform, no_prompt)
         finally:
             platform.pop("current_chapter_title", None)
@@ -2309,7 +2315,7 @@ def publish_chapter(context, page, platform, book_name, file_path, archive_dir, 
     return result
 
 
-def main(platform_key=DEFAULT_PLATFORM, book_name=None, publish_count=None, volume_num=None, no_prompt=False, headless=False):
+def main(platform_key=DEFAULT_PLATFORM, book_name=None, publish_count=None, volume_num=None, no_prompt=False, headless=False, progress_cb=None):
     platform = get_platform(platform_key)
     state_file = resolve_existing_state_file(platform)
     if not state_file:
@@ -2357,15 +2363,39 @@ def main(platform_key=DEFAULT_PLATFORM, book_name=None, publish_count=None, volu
     print(f"No prompt: {no_prompt}")
 
     success_count = 0
+    total = len(txt_files)
+    if progress_cb:
+        progress_cb("init", {"total": total, "book": selected_book, "platform": platform["key"]})
     with sync_playwright() as p:
         browser = launch_anti_detect_browser(p, headless=headless)
         context = create_anti_detect_context(browser, storage_state=state_file)
         page = context.new_page()
         attach_dialog_handler(page)
         try:
-            for file_path in txt_files:
-                publish_chapter(context, page, platform, selected_book, file_path, archive_dir, no_prompt)
-                success_count += 1
+            for idx, file_path in enumerate(txt_files):
+                cn, ct, _ = parse_chapter(file_path)
+                if progress_cb:
+                    progress_cb("chapter_start", {
+                        "chapter_num": cn, "chapter_title": ct,
+                        "current": idx, "total": total,
+                    })
+                try:
+                    publish_chapter(context, page, platform, selected_book, file_path, archive_dir, no_prompt, progress_cb=progress_cb)
+                    success_count += 1
+                    if progress_cb:
+                        progress_cb("chapter_done", {
+                            "chapter_num": cn, "chapter_title": ct,
+                            "current": idx + 1, "total": total,
+                            "success": True, "reason": "published",
+                        })
+                except Exception as exc:
+                    if progress_cb:
+                        progress_cb("chapter_done", {
+                            "chapter_num": cn, "chapter_title": ct,
+                            "current": idx + 1, "total": total,
+                            "success": False, "reason": str(exc),
+                        })
+                    raise
                 page.wait_for_timeout(1000)
         except Exception as exc:
             print(f"[ERROR] Publish run stopped: {exc}")
@@ -2377,6 +2407,12 @@ def main(platform_key=DEFAULT_PLATFORM, book_name=None, publish_count=None, volu
             browser.close()
 
     print(f"Publish run finished. Success: {success_count}/{len(txt_files)}")
+    if progress_cb:
+        progress_cb("all_done", {"results": [
+            {"success": True} for _ in range(success_count)
+        ] + [
+            {"success": False, "reason": "stopped early"} for _ in range(len(txt_files) - success_count)
+        ]})
     return 0 if success_count == len(txt_files) else 1
 
 

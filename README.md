@@ -9,23 +9,25 @@
 ### 1. 安装依赖
 
 ```bash
-pip install playwright
+pip install playwright pywebview
 playwright install chromium
 ```
 
-### 2. 登录平台（每平台只需一次）
+### 2. 启动可视化界面
 
 ```bash
-python login.py qidian      # 起点
-python login.py fanqie      # 番茄
-python login.py faloo       # 飞卢
-python login.py qimao       # 七猫
-python login.py migu        # 咪咕
-python login.py ciweimao    # 刺猬猫
-python login.py haiduxiaoshuo  # 海读文学
+pip install pywebview
+python gui_main.py
 ```
 
-登录后会在项目根目录生成 `state_<平台>.json`，保存 cookie 和登录状态，后续发布时会自动加载，无需重复登录。
+也可以双击 `run_gui.bat` 直接启动。GUI 界面支持：
+
+- **平台切换**：下拉菜单即可在 7 个平台间切换
+- **一键登录**：点击「登录」按钮，浏览器自动打开登录页，手动登录后自动保存 cookie
+- **自动扫描**：自动扫描 `chapters/<平台>/` 下的所有小说目录
+- **批量发布**：选择小说 → 设置章数 → 点击「发布」，实时查看进度日志
+
+> 草稿目录和归档目录会随平台切换自动更新（如 `chapters/migu` → `chapters/qidian`），也可手动指定自定义目录。
 
 ### 3. 准备章节目录
 
@@ -53,7 +55,7 @@ chapters/
 
 > 章节文件命名需包含"第N章"，如 `第1章 xxx.txt`、`第01章 xxx.txt`，系统按章节号自然排序发布。
 
-### 4. 发布
+### 4. 命令行发布（可选）
 
 ```bash
 # 交互模式（会让你选书、选数量）
@@ -101,25 +103,30 @@ python publish.py --platform haiduxiaoshuo [参数]  # 海读文学
 
 ```
 novel_auto_publish/
-├── publish.py              # 核心发布引擎（Playwright 自动化）
-├── login.py                # 统一登录入口
-├── platform_config.py      # 各平台配置（URL、按钮文本、选择器）
-├── platform_utils.py       # 平台工具函数
-├── anti_detect.py          # 反检测浏览器启动
-├── main_webview.py         # WebView 桌面应用
+├── gui_main.py              # 统一可视化界面（pywebview 桌面应用）
+├── publish.py               # 核心发布引擎（Playwright 自动化）
+├── login.py                 # 统一登录入口
+├── platform_config.py       # 各平台配置（URL、按钮文本、选择器）
+├── platform_utils.py        # 平台工具函数
+├── anti_detect.py           # 反检测浏览器启动
 │
-├── platforms/              # 平台入口脚本
-│   ├── migu.py             # 咪咕一键发布
-│   ├── migu_login.py       # 咪咕登录
-│   ├── fanqie_publish.py   # 番茄发布
-│   ├── fanqie_login.py     # 番茄登录
-│   ├── ciweimao.py         # 刺猬猫一键发布
-│   ├── ciweimao_login.py   # 刺猬猫登录
-│   ├── haiduxiaoshuo.py    # 海读文学一键发布
+├── web/                     # 前端界面
+│   ├── index.html           # UI 布局（Tailwind CSS 暗色主题）
+│   ├── script.js            # 前端逻辑（JS-Python 桥接）
+│   └── style.css            # 6 套配色主题
+│
+├── platforms/               # 平台入口脚本
+│   ├── migu.py              # 咪咕一键发布
+│   ├── migu_login.py        # 咪咕登录
+│   ├── fanqie_publish.py    # 番茄发布
+│   ├── fanqie_login.py      # 番茄登录
+│   ├── ciweimao.py          # 刺猬猫一键发布
+│   ├── ciweimao_login.py    # 刺猬猫登录
+│   ├── haiduxiaoshuo.py     # 海读文学一键发布
 │   ├── haiduxiaoshuo_login.py  # 海读文学登录
 │   └── ...
 │
-├── chapters/               # 待发布章节（按平台→书名组织）
+├── chapters/                # 待发布章节（按平台→书名组织）
 │   ├── migu/
 │   ├── qidian/
 │   ├── fanqie/
@@ -128,23 +135,26 @@ novel_auto_publish/
 │   ├── haiduxiaoshuo/
 │   └── qimao/
 │
-├── uploaded/               # 已发布归档（自动移入）
+├── uploaded/                # 已发布归档（自动移入）
 │   ├── migu/
 │   ├── qidian/
 │   ├── ciweimao/
 │   ├── haiduxiaoshuo/
 │   └── ...
 │
-├── debug/                  # 调试截图和 HTML（发布过程中自动保存）
-├── logs/                   # 定时任务日志
+├── debug/                   # 调试截图和 HTML（发布过程中自动保存）
+├── logs/                    # 定时任务日志
 │
-├── state_migu.json         # 咪咕登录态
-├── state_qidian.json       # 起点登录态
-├── state_fanqie.json       # 番茄登录态
-├── state_faloo.json        # 飞卢登录态
-├── state_ciweimao.json     # 刺猬猫登录态
-├── state_haiduxiaoshuo.json  # 海读文学登录态
-└── state_qimao.json        # 七猫登录态
+├── run_gui.bat              # GUI 一键启动
+├── config.json              # GUI 配置（目录路径等）
+│
+├── state_migu.json          # 咪咕登录态
+├── state_qidian.json        # 起点登录态
+├── state_fanqie.json        # 番茄登录态
+├── state_faloo.json         # 飞卢登录态
+├── state_ciweimao.json      # 刺猬猫登录态
+├── state_haiduxiaoshuo.json # 海读文学登录态
+└── state_qimao.json         # 七猫登录态
 ```
 
 ---
