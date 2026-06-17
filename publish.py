@@ -143,6 +143,34 @@ def first_visible_selector(page, selectors):
 
 
 def qimao_body_editor(page):
+    # Qimao has multiple contenteditable divs: main editor + right-side notes panel.
+    # Pick the largest contenteditable, but penalize small right-side panels.
+    try:
+        result = page.evaluate("""() => {
+            const els = document.querySelectorAll('[contenteditable="true"]');
+            let best = null, bestArea = 0;
+            for (const el of els) {
+                const rect = el.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) continue;
+                const cls = (el.className || '').toLowerCase();
+                let area = rect.width * rect.height;
+                // Heavily penalize sidebar / notes panels (small, on the right)
+                if (cls.includes('note') || cls.includes('memo')) area *= 0.001;
+                if (rect.width < 400 && rect.x > 800) area *= 0.001;
+                // Bonus for main-editor signals
+                if (cls.includes('book') || cls.includes('editor')) area *= 100;
+                if (area > bestArea) { bestArea = area; best = el; }
+            }
+            if (best) {
+                best.setAttribute('data-qimao-editor', '1');
+                return true;
+            }
+            return false;
+        }""")
+        if result:
+            return page.locator('[data-qimao-editor="1"]').first
+    except Exception:
+        pass
     selectors = [
         '.q-contenteditable.book[contenteditable="true"]',
         '[contenteditable="true"].book',
@@ -900,8 +928,8 @@ def fill_editor(page, platform, chapter_num, chapter_title, content):
     if chapter_num and not re.search(r"^\s*\u7b2c\s*\d+", full_title):
         full_title = f"\u7b2c{chapter_num}\u7ae0 {full_title}".strip()
 
-    # Fanqie / Haiduxiaoshuo auto-fills the chapter number prefix; strip it to avoid duplication
-    if platform.get("key") in ("fanqie", "haiduxiaoshuo"):
+    # Fanqie / Haiduxiaoshuo / Qimao auto-fill the chapter number prefix; strip it to avoid duplication
+    if platform.get("key") in ("fanqie", "haiduxiaoshuo", "qimao"):
         chapter_title = re.sub(r"第\s*\d+\s*章\s*", "", chapter_title).strip()
     title_value = full_title if platform.get("key") == "faloo" else chapter_title
 
@@ -1063,6 +1091,23 @@ def fill_editor(page, platform, chapter_num, chapter_title, content):
     except Exception as exc:
         print(f"[WARN] KindEditor fill failed: {exc}")
 
+    # --- qimao: use smart body-editor picker BEFORE generic contenteditable fallback ---
+    if platform.get("key") == "qimao":
+        editor = qimao_body_editor(page)
+        if editor:
+            paragraphs = [line.strip() for line in content.splitlines() if line.strip()]
+            html = "".join(f"<p>{p}</p>" for p in paragraphs)
+            editor.evaluate("""(el, html) => {
+                el.focus();
+                el.innerHTML = html;
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                el.dispatchEvent(new Event('blur', {bubbles: true}));
+            }""", html)
+            return
+        # Fall through to generic selectors if smart picker failed
+        pass
+
     # --- ciweimao: try additional selectors if KindEditor didn't match ---
     for selector in [".ql-editor", ".ProseMirror", '[contenteditable="true"]', "#content", "textarea"]:
         try:
@@ -1088,7 +1133,7 @@ def fill_editor(page, platform, chapter_num, chapter_title, content):
         except Exception:
             continue
 
-    editor = qimao_body_editor(page) if platform.get("key") == "qimao" else first_visible_selector(page, platform["body_selectors"])
+    editor = first_visible_selector(page, platform["body_selectors"])
     if not editor:
         raise RuntimeError("body editor not found")
     handle = editor.element_handle()
@@ -2040,6 +2085,25 @@ def publish_current_editor(page, platform, no_prompt):
             fanqie_handle_typo_dialog(page)
             fanqie_handle_content_check_dialog(page)
         page.wait_for_timeout(2000)
+        # Qimao: after clicking "发布", a confirm dialog pops up. Handle it immediately.
+        if platform.get("key") == "qimao":
+            for confirm_text in ["确认发布", "确 认 发 布", "立即发布", "确定", "确 定", "提交", "提 交"]:
+                try:
+                    btn = page.get_by_text(confirm_text, exact=False).last
+                    if btn.is_visible():
+                        print(f"[DEBUG] qimao confirm dialog: found '{confirm_text}', clicking...")
+                        btn.click(force=True)
+                        page.wait_for_timeout(3000)
+                        qimao_skip_important_notice(page)
+                        page.wait_for_timeout(1000)
+                        verified, reason = verify_publish_result(page, platform, chapter_title=platform.get("current_chapter_title"))
+                        print(f"[INFO] qimao publish verification: {reason}; url={page.url}")
+                        if verified:
+                            return "published"
+                        print(f"[DEBUG] qimao: verification failed after confirm click, continuing loop")
+                        break
+                except Exception:
+                    pass
         # Qidian: after clicking "发布", the page may publish and redirect
         # directly to the chapter list.  Check before entering the loop.
         if platform.get("key") == "qidian":
